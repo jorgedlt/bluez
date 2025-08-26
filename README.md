@@ -1,4 +1,4 @@
-# README for `ibmfuncs.sh`
+# README for `bluezfuncs.sh`
 
 ## Overview
 
