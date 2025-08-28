@@ -1,16 +1,15 @@
+# functions/devops.sh
 #!/usr/bin/env bash
-# devops.sh — DevOps toolchains (list/show/create)
+# devops.sh — DevOps toolchains (list/show/create), renamed functions
 # Requires IBM Cloud CLI "dev" commands (built into CLI).
-# Most DevOps commands require a targeted Resource Group.
 
-# Internal: make sure region and RG are targeted
 __tc_ensure_target() {
   _ensure_region "$IBMC_REGION"
   _ensure_rg
 }
 
-# Pretty list
-ibm_toolchains_ls() {
+# List toolchains (pretty table)
+ibmtoolchainsls() {
   __tc_ensure_target
 
   local j
@@ -35,9 +34,9 @@ ibm_toolchains_ls() {
 }
 
 # Show one toolchain by name or GUID
-ibm_toolchain_show() {
+ibmtoolchainshow() {
   local sel="${1:-}"
-  [[ -n "$sel" ]] || { echo "Usage: ibm_toolchain_show <name-or-guid>"; return 1; }
+  [[ -n "$sel" ]] || { echo "Usage: ibmtoolchainshow <name-or-guid>"; return 1; }
 
   __tc_ensure_target
 
@@ -52,11 +51,11 @@ ibm_toolchain_show() {
       '
 }
 
-# Create a toolchain (best-effort via DevOps API)
-# Usage: ibm_toolchain_mk <name> [-g ResourceGroupName] [-r region-id]
-ibm_toolchain_mk() {
+# Create a toolchain via DevOps API (best-effort)
+# Usage: ibmtoolchainmk <name> [-g ResourceGroupName] [-r region-id]
+ibmtoolchainmk() {
   local name="${1:-}"; shift || true
-  [[ -n "$name" ]] || { echo "Usage: ibm_toolchain_mk <name> [-g ResourceGroupName] [-r region]"; return 1; }
+  [[ -n "$name" ]] || { echo "Usage: ibmtoolchainmk <name> [-g ResourceGroupName] [-r region]"; return 1; }
 
   local rg_name="$IBMC_RG" region="$IBMC_REGION"
   while [[ $# -gt 0 ]]; do

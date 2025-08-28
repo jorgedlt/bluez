@@ -1,11 +1,12 @@
+# functions/login.sh
 #!/usr/bin/env bash
-# login.sh — login & authentication helpers
+# login.sh — login & authentication helpers (renamed functions)
 
-# ibm_login [-a acct|keyfile] [-r region] [-g rg] [-s] [-c sso-account]
+# ibmlogin [-a acct|keyfile] [-r region] [-g rg] [-s] [-c sso-account]
 # Notes:
 #   - With API key login, do NOT pass -c (account is implied by the key).
 #   - -s uses SSO and can accept -c <IMS_ID> to preselect account.
-ibm_login() {
+ibmlogin() {
   local acct="$IBMC_DEFAULT" region="$IBMC_REGION" rg="$IBMC_RG" use_sso=0 sso_account="" keyfile=""
   while getopts ":a:r:g:sc:K:" opt; do
     case "$opt" in
@@ -36,13 +37,13 @@ ibm_login() {
   _ensure_region "$region"
   _ensure_rg
 
-  ibm_whoami_show
+  ibmwhoami
 }
 
-# ibm_switch_account <sandbox|eposit|IMS_ID|/path/key.json>  [-s]
-ibm_switch_account() {
+# ibmswitchaccount <sandbox|eposit|IMS_ID|/path/key.json>  [-s]
+ibmswitchaccount() {
   local sel="${1:-}"; shift || true
-  [[ -n "$sel" ]] || { echo "Usage: ibm_switch_account <acct|keyfile> [-s]"; return 1; }
+  [[ -n "$sel" ]] || { echo "Usage: ibmswitchaccount <acct|keyfile> [-s]"; return 1; }
   local use_sso=0; [[ "${1:-}" == "-s" ]] && use_sso=1
 
   _ensure_region "$IBMC_REGION"
@@ -57,11 +58,11 @@ ibm_switch_account() {
 
   _ensure_region "$IBMC_REGION"
   _ensure_rg
-  ibm_whoami_show
+  ibmwhoami
 }
 
 # Pretty "who am I"
-ibm_whoami_show() {
+ibmwhoami() {
   ibmcloud target 2>/dev/null | awk '
     /^API endpoint/ ||
     /^Region/ ||
@@ -69,6 +70,3 @@ ibm_whoami_show() {
     /^Account/ ||
     /^Resource group/ {print}'
 }
-
-# Backcompat alias
-ibm_whoami() { ibm_whoami_show; }

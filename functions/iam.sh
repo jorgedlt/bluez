@@ -1,17 +1,6 @@
+# functions/iam.sh
 #!/usr/bin/env bash
-# functions/iam.sh — Resource Groups & IAM utilities
-#
-# Scope:
-#   - List/Create/Delete resource groups
-#   - (room for user/role/policy helpers later)
-#
-# Requires:
-#   - ibmcloud CLI
-#   - jq
-#
-# Conventions:
-#   - Never 'exit' from functions (so interactive shells don’t die)
-#   - On failure: print a clear message to stderr and 'return' non-zero
+# iam.sh — resource groups & accounts (IAM-adjacent), renamed functions
 
 # ----- internal soft dep check (no exit) ------------------------------------
 __iam_need() {
@@ -19,12 +8,10 @@ __iam_need() {
 }
 
 # ----- helpers --------------------------------------------------------------
-# Return currently targeted resource group name, or empty if none
 _iam_current_rg() {
   ibmcloud target 2>/dev/null | awk -F': ' '/^Resource group:/ {print $2}'
 }
 
-# Target the given resource group if it exists (quietly); return 0/1
 _iam_try_target_rg() {
   local rg="$1"
   [[ -n "$rg" ]] || return 1
@@ -34,15 +21,15 @@ _iam_try_target_rg() {
   return 0
 }
 
-# ----- Commands -------------------------------------------------------------
+# ----- Resource Groups ------------------------------------------------------
 # List resource groups (pretty table, safe)
-ibm_groups_ls() {
+ibmrgls() {
   __iam_need ibmcloud || return 1
   __iam_need jq       || return 1
 
   local j
   if ! j="$(ibmcloud resource groups --output json 2>/dev/null)"; then
-    echo "Failed to query resource groups. Are you logged in? (ibm_login)" >&2
+    echo "Failed to query resource groups. Are you logged in? (ibmlogin)" >&2
     return 1
   fi
 
@@ -51,13 +38,9 @@ ibm_groups_ls() {
     return 0
   fi
 
-  # Determine currently targeted RG to mark with '*'
   local cur; cur="$(_iam_current_rg)"
 
-  # Header
   printf "%-24s | %-36s | %-8s\n" "Resource Group" "ID" "State"
-
-  # Rows
   echo "$j" \
     | jq -r '.[] | [.name, .id, .state] | @tsv' \
     | awk -F'\t' -v cur="$cur" '{
@@ -66,18 +49,17 @@ ibm_groups_ls() {
       }'
 }
 
-# Create a resource group and (optionally) target it
-# Usage: ibm_groups_mk <name> [--target]
-ibm_groups_mk() {
+# Create a resource group and optionally target it
+# Usage: ibmrgmk <name> [--target]
+ibmrgmk() {
   __iam_need ibmcloud || return 1
   local name="$1"
   shift || true
   local do_target=0
   [[ "$1" == "--target" ]] && do_target=1
 
-  [[ -n "$name" ]] || { echo "Usage: ibm_groups_mk <name> [--target]" >&2; return 1; }
+  [[ -n "$name" ]] || { echo "Usage: ibmrgmk <name> [--target]" >&2; return 1; }
 
-  # Exists?
   if ibmcloud resource groups --output json 2>/dev/null \
        | jq -e --arg n "$name" '.[] | select(.name==$n)' >/dev/null; then
     echo "Resource group already exists: $name"
@@ -89,29 +71,27 @@ ibm_groups_mk() {
   fi
 
   (( do_target )) && ibmcloud target -g "$name" >/dev/null 2>&1 || true
-  ibm_groups_ls
+  ibmrgls
 }
 
 # Delete a resource group by exact name
-# Usage: ibm_groups_rm <name> [--force]
-ibm_groups_rm() {
+# Usage: ibmrgrm <name> [--force]
+ibmrgrm() {
   __iam_need ibmcloud || return 1
   local name="$1"
   shift || true
   local force=0
   [[ "$1" == "--force" || "$1" == "-f" ]] && force=1
 
-  [[ -n "$name" ]] || { echo "Usage: ibm_groups_rm <name> [--force]" >&2; return 1; }
+  [[ -n "$name" ]] || { echo "Usage: ibmrgrm <name> [--force]" >&2; return 1; }
   [[ "$name" == "Default" ]] && { echo "Refusing to remove the Default group" >&2; return 1; }
 
-  # Verify exists
   if ! ibmcloud resource groups --output json 2>/dev/null \
         | jq -e --arg n "$name" '.[] | select(.name==$n)' >/dev/null; then
     echo "Resource group not found: $name" >&2
     return 1
   fi
 
-  # If currently targeted, hop to another group first to be nice
   local cur other
   cur="$(_iam_current_rg)"
   if [[ "$cur" == "$name" ]]; then
@@ -127,12 +107,37 @@ ibm_groups_rm() {
     ibmcloud resource group-delete "$name"    || { echo "Failed to delete: $name" >&2; return 1; }
   fi
 
-  ibm_groups_ls
+  ibmrgls
 }
 
-# Friendly status wrapper (uses your existing whoami func if present)
-ibm_iam_status() {
-  type -t ibm_whoami_show >/dev/null 2>&1 && ibm_whoami_show
-  echo
-  ibm_groups_ls
+# ----- Accounts (best-effort fields) ---------------------------------------
+ibmaccountsls() {
+  local header="Name\tIMS_ID\tGUID\tState"
+  local widths="28,12,36,10"
+
+  local j
+  j="$(ibmcloud account list --output json 2>/dev/null || true)"
+  if [[ -n "$j" && "$j" != "null" ]]; then
+    printf "%s" "$j" \
+      | jq -r '.[] | [
+          (.Name // .name // "unknown"),
+          ((.IMSAccountID // .ims_account_id // .AccountID // .account_number // .Number // "unknown") | tostring),
+          (.AccountGUID // .account_guid // .account_id // .guid //
+            (try ((.CRN // .crn) | capture("account:(?<id>[^:]+)$").id) catch "unknown")),
+          (.State // .state // "unknown")
+        ] | @tsv' \
+      | _print_table "$header" "$widths"
+    return
+  fi
+
+  ibmcloud account list 2>/dev/null \
+    | awk -F'|' 'NR>2 && NF {gsub(/^[ \t]+|[ \t]+$/, "", $1); gsub(/^[ \t]+|[ \t]+$/, "", $2); print $1 "\tunknown\tunknown\t" $2}' \
+    | _print_table "$header" "$widths"
+}
+
+# ----- Combined status ------------------------------------------------------
+ibmstatus() {
+  ibmwhoami; echo
+  ibmrgls;   echo
+  ibmaccountsls
 }

@@ -1,3 +1,4 @@
+# init.sh
 #!/usr/bin/env bash
 # init.sh — shared configuration & helpers for IBM Cloud bash toolkit
 
@@ -10,15 +11,12 @@
 : "${IBMC_KEYFILE_SANDBOX:=$HOME/ibmcloud_api_key_sandbox.json}"   # IMS 3127011
 : "${IBMC_KEYFILE_EPOSIT:=$HOME/ibmcloud_api_key.json}"            # IMS 2617128
 
-# Default account selector used by ibm_login when -a is omitted
+# Default account selector used by ibmlogin when -a is omitted
 : "${IBMC_DEFAULT:=sandbox}"
 
 # -------- Dependency checks --------
 _need() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "Missing dependency: $1" >&2
-    return 1
-  }
+  command -v "$1" >/dev/null 2>&1 || { echo "Missing dependency: $1" >&2; return 1; }
 }
 _die() { echo "ERROR: $*" >&2; return 1; }
 
@@ -61,7 +59,6 @@ _ensure_region() {
 }
 
 _ensure_rg() {
-  # If no RG targeted, target IBMC_RG (default "Default") if it exists
   local cur; cur="$(_current_rg_name)"
   if [[ -z "$cur" || "$cur" =~ ^No\ resource\ group\ targeted ]]; then
     if ibmcloud resource groups --output json 2>/dev/null \
@@ -78,21 +75,18 @@ _print_table() {
   local IFS=$'\t' cols=( $header )
   IFS=',' read -r -a widths <<<"$widths_csv"
 
-  # header
   for i in "${!cols[@]}"; do
     printf "%-${widths[$i]}s" "${cols[$i]}"
     [[ $i -lt $(( ${#cols[@]} - 1 )) ]] && printf " | "
   done
   printf "\n"
 
-  # underline
   for i in "${!cols[@]}"; do
     printf "%-${widths[$i]}s" "$(printf '%*s' "${widths[$i]}" '' | tr ' ' '-')"
     [[ $i -lt $(( ${#cols[@]} - 1 )) ]] && printf "-+-"
   done
   printf "\n"
 
-  # rows
   while IFS=$'\t' read -r -a row; do
     [[ ${#row[@]} -eq 0 ]] && continue
     for i in "${!row[@]}"; do
