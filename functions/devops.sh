@@ -9,6 +9,8 @@ __tc_ensure_target() {
 }
 
 # List toolchains (pretty table)
+# List DevOps toolchains (pretty table)
+# Usage: ibmtoolchainsls
 ibmtoolchainsls() {
   __tc_ensure_target
 
@@ -34,6 +36,8 @@ ibmtoolchainsls() {
 }
 
 # Show one toolchain by name or GUID
+# Show one toolchain by name or GUID
+# Usage: ibmtoolchainshow <name-or-guid>
 ibmtoolchainshow() {
   local sel="${1:-}"
   [[ -n "$sel" ]] || { echo "Usage: ibmtoolchainshow <name-or-guid>"; return 1; }
@@ -53,6 +57,8 @@ ibmtoolchainshow() {
 
 # Create a toolchain via DevOps API (best-effort)
 # Usage: ibmtoolchainmk <name> [-g ResourceGroupName] [-r region-id]
+# Create a toolchain via DevOps API
+# Usage: ibmtoolchainmk <name>
 ibmtoolchainmk() {
   local name="${1:-}"; shift || true
   [[ -n "$name" ]] || { echo "Usage: ibmtoolchainmk <name> [-g ResourceGroupName] [-r region]"; return 1; }

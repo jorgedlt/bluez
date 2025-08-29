@@ -2,6 +2,7 @@
 # iam_access.sh — IAM users and access groups (non-overlapping with existing rg/accounts)
 
 # List account users
+# Usage: ibmusers
 ibmusers() {
   ibmcloud account users --output json | jq -r '.[] | [.user_id, .state, (.email // "n/a")] | @tsv' \
     | awk -F'\t' 'BEGIN{
@@ -12,6 +13,7 @@ ibmusers() {
 }
 
 # List IAM access groups
+# Usage: ibmagls
 ibmagls() {
   ibmcloud iam access-groups --output json | jq -r '.groups[] | [.name, .id] | @tsv' \
     | awk -F'\t' 'BEGIN{

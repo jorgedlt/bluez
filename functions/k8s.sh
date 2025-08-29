@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # k8s.sh — IBM Kubernetes Service and OpenShift listings
 
-# IBM Kubernetes Service clusters
+# List IBM Kubernetes Service clusters
+# Usage: ibmksls
 ibmksls() {
   ibmcloud ks clusters --json | jq -r '.[] | [.name, .id, .region, .worker_count, .state] | @tsv' \
     | awk -F'\t' 'BEGIN{
@@ -11,7 +12,8 @@ ibmksls() {
       }'
 }
 
-# Red Hat OpenShift clusters
+# List Red Hat OpenShift clusters
+# Usage: ibmrosa
 ibmrosa() {
   ibmcloud oc clusters --output json | jq -r '.[] | [.name, .id, .region, .ingressHostname, .state] | @tsv' \
     | awk -F'\t' 'BEGIN{

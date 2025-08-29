@@ -3,6 +3,7 @@
 # Requires 'ibmcloud cos config' done beforehand.
 
 # List COS buckets
+# Usage: ibmcosbuckets
 ibmcosbuckets() {
   ibmcloud cos bucket-list --output json | jq -r '.Buckets[] | .Name' 2>/dev/null \
     | awk '{printf "  - %s\n",$0}'

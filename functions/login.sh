@@ -2,10 +2,8 @@
 #!/usr/bin/env bash
 # login.sh — login & authentication helpers (renamed functions)
 
-# ibmlogin [-a acct|keyfile] [-r region] [-g rg] [-s] [-c sso-account]
-# Notes:
-#   - With API key login, do NOT pass -c (account is implied by the key).
-#   - -s uses SSO and can accept -c <IMS_ID> to preselect account.
+# Authenticate into IBM Cloud CLI
+# Usage: ibmlogin
 ibmlogin() {
   local acct="$IBMC_DEFAULT" region="$IBMC_REGION" rg="$IBMC_RG" use_sso=0 sso_account="" keyfile=""
   while getopts ":a:r:g:sc:K:" opt; do
@@ -40,19 +38,8 @@ ibmlogin() {
   ibmwhoami
 }
 
-# ibmaccls — list all IBM Cloud accounts accessible to the user
-# ibmaccls() {
-#   ibmcloud account list --output json 2>/dev/null \
-#   | jq -r '.[] | [.Name, .Guid, .State, (.OwnerIamId // "n/a")] | @tsv' \
-#   | awk -F'\t' 'BEGIN{
-#       printf "%-40s %-36s %-10s %s\n","Name","AccountID","State","Owner"
-#     }{
-#       printf "%-40s %-36s %-10s %s\n",$1,$2,$3,$4
-#     }'
-# }
-
+# List IBM Cloud accounts available to the user
 # Usage: ibmaccls
-# ibmaccls — list all IBM Cloud accounts accessible to the user (handles both JSON shapes)
 ibmaccls() {
   # Try JSON first
   local j out
@@ -104,7 +91,8 @@ ibmaccls() {
     }'
 }
 
-# ibmaccswap <sandbox|eposit|IMS_ID|/path/key.json>  [-s]
+# Switch to another IBM Cloud account or API key
+# Usage: ibmaccswap <acct|keyfile>
 ibmaccswap() {
   local sel="${1:-}"; shift || true
   [[ -n "$sel" ]] || { echo "Usage: ibmaccswap <acct|keyfile> [-s]"; return 1; }
@@ -125,7 +113,8 @@ ibmaccswap() {
   ibmwhoami
 }
 
-# Pretty "who am I"
+# Show current IBM Cloud target (account, region, resource group, user)
+# Usage: ibmwhoami
 ibmwhoami() {
   ibmcloud target 2>/dev/null | awk '
     /^API endpoint/ ||

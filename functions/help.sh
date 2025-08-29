@@ -4,6 +4,8 @@
 # - If a function lacks a Usage line but has a nearby comment header, show its name.
 # - Supports optional filtering: `ibmhelp <keyword>`.
 
+# Show help for all loaded modules and functions
+# Usage: ibmhelp [keyword]
 ibmhelp() {
   local root="${BLUEZ_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
   local filter="${1:-}"

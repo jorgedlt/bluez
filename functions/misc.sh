@@ -3,7 +3,8 @@
 # Note: we intentionally DO NOT add an ibmswitch() here to avoid conflicting
 # with the newer ibmswitchaccount in login.sh.
 
-# Show installed IBM Cloud CLI plugins
+#+ Show installed IBM Cloud CLI plugins
+# Usage: ibmplugins
 ibmplugins() { ibmcloud plugin list; }
 
 # Clear IBM Cloud related environment variables
@@ -22,7 +23,8 @@ ibmclr() {
 qsu() { ibmcloud target -r us-south -g default && ibmwhoami; }
 qsee(){ ibmcloud target -r eu-de    -g default && ibmwhoami; }
 
-# Interactive account selector (kept, no conflict)
+#+ Interactive account selector
+# Usage: ibmpick
 ibmpick() {
   mapfile -t ACC_LINES < <(ibmcloud account list --output json | jq -r '.[] | "\(.name)\t\(.account_id)"' | sort)
   PS3="Select IBM Cloud account: "
@@ -35,6 +37,7 @@ ibmpick() {
 }
 
 # Optional convenience: wrapper to set region and RG, then show status
+#+ Set region and resource group, then show status
 # Usage: ibmtarget <region> [resource_group]
 ibmtarget() {
   [[ $# -ge 1 ]] || { echo "Usage: ibmtarget <region> [resource_group]"; return 2; }

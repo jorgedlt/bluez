@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # resources.sh — resource inventory, group detail, regions
 
-# Show a single resource group by name
+# Show a resource group’s JSON by name
 # Usage: ibmrgshow <resource_group_name>
 ibmrgshow() {
   [[ $# -eq 1 ]] || { echo "Usage: ibmrgshow <resource_group_name>"; return 2; }
@@ -9,7 +9,7 @@ ibmrgshow() {
 }
 
 # List service instances across all resource groups
-# Optional grep-like filter: ibmresls <regex>
+# Usage: ibmresls [regex]
 ibmresls() {
   local srch="${1:-.}"
   ibmcloud resource service-instances --all-resource-groups --output json \
@@ -21,7 +21,7 @@ ibmresls() {
       }'
 }
 
-# Dump a single service instance JSON by name
+# Show a service instance’s JSON by name
 # Usage: ibmresdump <service_instance_name>
 ibmresdump() {
   [[ $# -eq 1 ]] || { echo "Usage: ibmresdump <service_instance_name>"; return 2; }
@@ -38,7 +38,8 @@ ibmresrm() {
   ibmcloud resource service-instance-delete "$name" --recursive --force
 }
 
-# Regions overview
+# List VPC and account regions
+# Usage: ibmregionsls
 ibmregionsls() {
   echo "VPC regions"
   ibmcloud is regions --output json | jq -r '.[] | [.name, .endpoint] | @tsv' \
@@ -48,7 +49,8 @@ ibmregionsls() {
   ibmcloud regions
 }
 
-# Count resources by region (using resource search)
+# Count resources by region
+# Usage: ibmregionssum
 ibmregionssum() {
   ibmcloud resource search 'type:*' --output json \
     | jq -r '.items[] | .region_id // "global"' \
