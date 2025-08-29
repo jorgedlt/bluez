@@ -51,6 +51,7 @@ ibmlogin() {
 #     }'
 # }
 
+# Usage: ibmaccls
 # ibmaccls — list all IBM Cloud accounts accessible to the user (handles both JSON shapes)
 ibmaccls() {
   # Try JSON first
