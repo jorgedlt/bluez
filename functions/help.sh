@@ -1,90 +1,115 @@
 #!/usr/bin/env bash
 # help.sh — dynamic help for all loaded modules
-# - Scans functions/*.sh for lines starting with "# Usage:".
-# - If a function lacks a Usage line but has a nearby comment header, show its name.
-# - Supports optional filtering: `ibmhelp <keyword>`.
+# - Scans functions/*.sh for lines starting with "# Usage:" and prints them.
+# - Accepts optional filtering:  ibmhelp <keyword>
+# - Pretty, colored, de-duplicated output.
 
-# Show help for all loaded modules and functions
-# Usage: ibmhelp [keyword]
 ibmhelp() {
-  local root="${BLUEZ_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+  local root="${BLUEZ_ROOT:-"$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"}"
   local filter="${1:-}"
+  local -i any=0
 
+  # Colors
+  local _bold _reset _cyan
+  _bold="$(tput bold 2>/dev/null || true)"
+  _reset="$(tput sgr0 2>/dev/null || true)"
+  _cyan="$(tput setaf 6 2>/dev/null || true)"
+
+  # resolve files once
   shopt -s nullglob
-  local files=("$root/functions/"*.sh)
+  local files=("$root"/functions/*.sh)
+  shopt -u nullglob
 
-  local leftw=28
-  local any_match=0     # tracks whether ANY file printed a match
+  # seen set to avoid duplicate Usage lines (across files)
+  declare -A _seen
+
+  # helper: trim leading/trailing spaces
+  _trim() { sed -e 's/^[[:space:]]\+//' -e 's/[[:space:]]\+$//' ; }
+
+  # helper: clean a "NN:# Usage: ..." line -> "Usage: ..."
+  _clean_usage() {
+    sed -E 's/^[[:space:]]*[0-9]+:[[:space:]]*#?[[:space:]]*Usage:[[:space:]]*/Usage: /; s/^[[:space:]]*#?[[:space:]]*Usage:[[:space:]]*/Usage: /' \
+    | _trim
+  }
+
+  # helper: first descriptive comment line near top (not a Usage)
+  _header_of() {
+    awk '
+      NR<=10 && $0 ~ /^#[[:space:]]+/ && $0 !~ /#[[:space:]]*Usage:/ {
+        sub(/^#[[:space:]]*/, "", $0); print; exit
+      }' "$1"
+  }
+
+  # helper: cyan rule
+  _rule() { printf "%s%s%s\n" "${_cyan}" "─%.0s" "${_reset}" | head -c 90; echo; }
+
+  # Iterate files in name-sorted order for stable output
+  IFS=$'\n' files=($(printf "%s\n" "${files[@]}" | sort)); unset IFS
 
   for f in "${files[@]}"; do
     local base; base="$(basename "$f")"
 
-    # 1) Collect explicit Usage lines
-    local -a usages=()
-    while IFS= read -r line; do
-      # strip leading "# Usage:" (allow optional extra spaces)
-      line="${line#\#}"
-      line="${line# }"
-      line="${line#Usage: }"
-      [[ -z "$filter" || "$line" == *"$filter"* ]] && usages+=("$line")
-    done < <(grep -nE '^[[:space:]]*#[: ]+Usage:' "$f" 2>/dev/null || true)
+    # collect all explicit Usage lines from the file
+    local usages; usages="$(grep -nE '^[[:space:]]*#*[[:space:]]*Usage:' "$f" 2>/dev/null | _clean_usage | awk 'NF')"
 
-    # 2) Fallback: function names that have a comment just above
-    # (comment within 3 lines before "name() {")
-    local -a fallbacks=()
-    while IFS= read -r fn; do
-      # Skip fallback if already covered by an explicit Usage line
-      local dup=0
-      for L in "${usages[@]}"; do
-        [[ "$L" == "$fn"* ]] && { dup=1; break; }
-      done
-      (( dup )) && continue
-      [[ -z "$filter" || "$fn" == *"$filter"* ]] && fallbacks+=("$fn")
-    done < <(awk '
-      /^[[:space:]]*#/ { last_comment=NR; next }
-      /^[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*\(\)[[:space:]]*\{/ {
-        if (last_comment && NR-last_comment<=3) {
-          name=$1; sub(/\(.*/,"",name); print name
-        }
-        last_comment=0
-      }
-    ' "$f" | sort -u)
+    # optional filter: match file name, header text, or any usage line
+    local hdr; hdr="$(_header_of "$f")"
+    local include_file=1
+    if [[ -n "$filter" ]]; then
+      include_file=0
+      # case-insensitive filter
+      if echo "$base" | grep -iq -- "$filter"; then include_file=1; fi
+      if [[ $include_file -eq 0 && -n "$hdr" ]] && echo "$hdr" | grep -iq -- "$filter"; then include_file=1; fi
+      if [[ $include_file -eq 0 && -n "$usages" ]] && echo "$usages" | grep -iq -- "$filter"; then include_file=1; fi
+    fi
+    [[ $include_file -eq 1 ]] || continue
 
-    # If nothing to show for this file, continue
-    if ((${#usages[@]}==0 && ${#fallbacks[@]}==0)); then
+    # nothing to show? (no usages and no header match) skip
+    if [[ -z "$usages" ]]; then
+      # still show a section if file matched the filter (by its name/header) to help discovery
+      if [[ -n "$filter" ]]; then
+        echo
+        printf "%s%s%s — %s\n" "${_bold}${_cyan}" "${base}" "${_reset}" "${hdr:-"(no description)"}"
+        _rule
+        printf "  %s\n" "(No Usage lines found in this module yet.)"
+        any=1
+      fi
       continue
     fi
 
-    any_match=1
-
-    # Pretty file header: first meaningful comment line, else filename
-    local hdr
-    hdr="$(awk '
-      NR==1{next}
-      /^#[[:space:]]*[-A-Za-z0-9]/ { sub(/^#[[:space:]]*/,""); print; exit }
-    ' "$f")"
-    [[ -z "$hdr" ]] && hdr="$base"
-
-    printf "%s — %s\n" "$base" "$hdr"
-
-    # Print Usage lines first
-    for L in "${usages[@]}"; do
-      local cmd="${L%% *}"
-      local args=""
-      [[ "$cmd" == "$L" ]] || args="${L#"$cmd"}"
-      printf "  %-${leftw}s %s\n" "$cmd" "$args"
-    done
-
-    # Then fallbacks
-    for fn in "${fallbacks[@]}"; do
-      printf "  %-${leftw}s %s\n" "$fn" ""
-    done
-
+    # print section header
     echo
+    printf "%s%s%s — %s\n" "${_bold}${_cyan}" "${base}" "${_reset}" "${hdr:-"(no description)"}"
+    _rule
+
+    # print each Usage once
+    local printed=0
+    while IFS= read -r u; do
+      [[ -n "$u" ]] || continue
+
+      # optional filter at the line level
+      if [[ -n "$filter" ]] && ! echo "$u" | grep -iq -- "$filter"; then
+        # still allow showing if file/header matched; we already decided to include the file,
+        # but we want the lines to reflect the filter. So skip non-matching lines when filter is present.
+        continue
+      fi
+
+      if [[ -z "${_seen[$u]+x}" ]]; then
+        _seen["$u"]=1
+        printf "  %s\n" "$u"
+        printed=1
+      fi
+    done <<< "$usages"
+
+    # if filtering eliminated all usages for this file, show a small note once
+    if [[ $printed -eq 0 && -n "$filter" ]]; then
+      printf "  %s\n" "(No matching commands/usages in this module for filter: \"$filter\")"
+    fi
+
+    any=1
   done
 
-  # If a filter was provided and nothing matched, say so — without recursion.
-  if [[ -n "$filter" && $any_match -eq 0 ]]; then
-    printf '(no matching commands/usages for filter: "%s")\n' "$filter"
+  if [[ $any -eq 0 ]]; then
+    printf "No commands matched filter: %s\n" "${filter:-(none)}"
   fi
 }
