@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-# vpc.sh — VPC instances, floating IPs, security groups and rules
+# vpc.sh, VPC instances, floating IPs, security groups and rules
 
-# List VPC instances
+# Provide a local _need if init.sh was not sourced
+if ! declare -F _need >/dev/null 2>&1; then
+  _need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing dependency: $1" >&2; return 1; }; }
+fi
+
 # Usage: ibmvmls
 ibmvmls() {
+  _need ibmcloud || return 1
+  _need jq || return 1
   ibmcloud is instances --output json \
     | jq -r '.[] | [.name, .id, .zone.name, .status, (.primary_network_interface.primary_ipv4_address // "n/a")] | @tsv' \
     | awk -F'\t' 'BEGIN{
@@ -13,26 +19,25 @@ ibmvmls() {
       }'
 }
 
-# Show details for a specific VPC instance by ID or name
 # Usage: ibmvmshow <instance_id_or_name>
 ibmvmshow() {
+  _need ibmcloud || return 1
+  _need jq || return 1
   [[ $# -eq 1 ]] || { echo "Usage: ibmvmshow <instance_id_or_name>"; return 2; }
   ibmcloud is instance "$1" --output json | jq .
 }
 
-## Start a VPC virtual machine instance by ID or name
 # Usage: ibmvmstart <id_or_name>
-ibmvmstart() { [[ $# -eq 1 ]] || { echo "Usage: ibmvmstart <id_or_name>"; return 2; }; ibmcloud is instance-start "$1"; }
-## Stop a VPC virtual machine instance by ID or name
+ibmvmstart() { _need ibmcloud || return 1; [[ $# -eq 1 ]] || { echo "Usage: ibmvmstart <id_or_name>"; return 2; }; ibmcloud is instance-start "$1"; }
 # Usage: ibmvmstop <id_or_name>
-ibmvmstop()  { [[ $# -eq 1 ]] || { echo "Usage: ibmvmstop <id_or_name>";  return 2; }; ibmcloud is instance-stop  "$1"; }
-## Reboot a VPC virtual machine instance by ID or name
+ibmvmstop()  { _need ibmcloud || return 1; [[ $# -eq 1 ]] || { echo "Usage: ibmvmstop <id_or_name>";  return 2; }; ibmcloud is instance-stop  "$1"; }
 # Usage: ibmvmreboot <id_or_name>
-ibmvmreboot(){ [[ $# -eq 1 ]] || { echo "Usage: ibmvmreboot <id_or_name>";return 2; }; ibmcloud is instance-reboot"$1"; }
+ibmvmreboot(){ _need ibmcloud || return 1; [[ $# -eq 1 ]] || { echo "Usage: ibmvmreboot <id_or_name>";return 2; }; ibmcloud is instance-reboot "$1"; }
 
-# Show the primary IPv4 and floating IPs for a VPC instance
 # Usage: ibmvmip <instance_id_or_name>
 ibmvmip() {
+  _need ibmcloud || return 1
+  _need jq || return 1
   [[ $# -eq 1 ]] || { echo "Usage: ibmvmip <instance_id_or_name>"; return 2; }
   local j; j="$(ibmcloud is instance "$1" --output json)"
   local primary_ip; primary_ip="$(jq -r '.primary_network_interface.primary_ipv4_address // "n/a"' <<<"$j")"
@@ -41,9 +46,10 @@ ibmvmip() {
   jq -r '.network_interfaces[].floating_ips[]?.address' <<<"$j" 2>/dev/null | sed 's/^/  - /' || echo "  - none"
 }
 
-# List all floating IPs and their bindings
 # Usage: ibmipls
 ibmipls() {
+  _need ibmcloud || return 1
+  _need jq || return 1
   ibmcloud is floating-ips --output json \
     | jq -r '.[] | [.name, .id, .address, (.target.name // "unbound")] | @tsv' \
     | awk -F'\t' 'BEGIN{
@@ -53,9 +59,10 @@ ibmipls() {
       }'
 }
 
-# List all security groups with their VPC and resource group
 # Usage: ibmisgls
 ibmisgls() {
+  _need ibmcloud || return 1
+  _need jq || return 1
   ibmcloud is security-groups --output json \
     | jq -r '.[] | [.name, .id, (.vpc.name // "n/a"), .resource_group.name] | @tsv' \
     | awk -F'\t' 'BEGIN{
@@ -65,9 +72,10 @@ ibmisgls() {
       }'
 }
 
-# List all rules for a given security group
 # Usage: ibmisgrules <sg_id_or_name>
 ibmisgrules() {
+  _need ibmcloud || return 1
+  _need jq || return 1
   [[ $# -eq 1 ]] || { echo "Usage: ibmisgrules <sg_id_or_name>"; return 2; }
   ibmcloud is security-group "$1" --output json \
     | jq -r '.rules[] | [.id, .direction, .protocol, (.port_min // "-"), (.port_max // "-"), (.remote.address // .remote.name // "-")] | @tsv' \
@@ -78,9 +86,9 @@ ibmisgrules() {
       }'
 }
 
-# Add an inbound/outbound SG rule
 # Usage: ibmisgruleadd <sg> <inbound|outbound> <tcp|udp|all|icmp> <portMin|-> <portMax|-> <remote>
 ibmisgruleadd() {
+  _need ibmcloud || return 1
   [[ $# -eq 6 ]] || { echo "Usage: ibmisgruleadd <sg> <inbound|outbound> <tcp|udp|all|icmp> <portMin|-> <portMax|-> <remote>"; return 2; }
   local sg="$1" dir="$2" proto="$3" pmin="$4" pmax="$5" remote="$6"
   local args=( security-group-rule-add "$sg" "$dir" "$proto" )
@@ -91,16 +99,17 @@ ibmisgruleadd() {
   ibmcloud is "${args[@]}"
 }
 
-# Remove a rule from a security group by rule ID
 # Usage: ibmisgrulerm <sg_id_or_name> <rule_id>
 ibmisgrulerm() {
+  _need ibmcloud || return 1
   [[ $# -eq 2 ]] || { echo "Usage: ibmisgrulerm <sg_id_or_name> <rule_id>"; return 2; }
   ibmcloud is security-group-rule-delete "$1" "$2"
 }
 
-# Remove all inbound allow rules from a security group (default deny applies)
 # Usage: ibmisginbounddenyall <sg_id_or_name>
 ibmisginbounddenyall() {
+  _need ibmcloud || return 1
+  _need jq || return 1
   [[ $# -eq 1 ]] || { echo "Usage: ibmisginbounddenyall <sg_id_or_name>"; return 2; }
   local sg="$1"
   local j; j="$(ibmcloud is security-group "$sg" --output json)"

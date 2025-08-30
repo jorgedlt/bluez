@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # iam_access.sh — IAM users and access groups (non-overlapping with existing rg/accounts)
 
-# List account users
-# Usage: ibmusers
-ibmusers() {
-  ibmcloud account users --output json | jq -r '.[] | [.user_id, .state, (.email // "n/a")] | @tsv' \
+# ibmuserls — List account users
+# Usage: ibmuserls
+ibmuserls() {
+  ibmcloud account users --output json \
+    | jq -r '.[] | [.user_id, .state, (.email // "n/a")] | @tsv' \
     | awk -F'\t' 'BEGIN{
         printf "%-36s %-8s %s\n","UserID","State","Email"
       }{

@@ -1,121 +1,115 @@
 #!/usr/bin/env bash
-# login.sh — login & authentication helpers
+# login.sh, login and account helpers
 
-# ibmlogin [-a acct|keyfile] [-r region] [-g rg] [-s] [-c sso-account]
+: "${RED:=$'\033[31m'}"
+: "${GREEN:=$'\033[32m'}"
+: "${YELLOW:=$'\033[33m'}"
+: "${CYAN:=$'\033[36m'}"
+: "${BOLD:=$'\033[1m'}"
+: "${RESET:=$'\033[0m'}"
+
+# Provide _need if init.sh was not sourced
+if ! declare -F _need >/dev/null 2>&1; then
+  _need() { command -v "$1" >/dev/null 2>&1 || { printf "%sMissing dependency: %s%s\n" "$RED" "$1" "$RESET" >&2; return 1; }; }
+fi
+
+# Fallback for _keyfile_for and defaults if init.sh was not sourced
+if ! declare -F _keyfile_for >/dev/null 2>&1; then
+  _keyfile_for() {
+    local sel="$1"
+    if [[ "$sel" == */* || "$sel" == *.json ]]; then
+      [[ -r "$sel" ]] && { printf '%s\n' "$sel"; return 0; }
+    fi
+    printf '%s\n' "${IBMC_KEYFILE_SANDBOX:-$HOME/ibmcloud_api_key_sandbox.json}"
+  }
+fi
+: "${IBMC_API_ENDPOINT:=https://cloud.ibm.com}"
+: "${IBMC_REGION:=us-south}"
+: "${IBMC_RG:=default}"
+: "${IBMC_DEFAULT:=sandbox}"
+
+# Usage: ibmlogin [key-or-alias] [--region REGION] [--rg GROUP]
 ibmlogin() {
-  local acct="$IBMC_DEFAULT" region="$IBMC_REGION" rg="$IBMC_RG" use_sso=0 sso_account="" keyfile=""
-  while getopts ":a:r:g:sc:K:" opt; do
-    case "$opt" in
-      a) acct="$OPTARG" ;;
-      r) region="$OPTARG" ;;
-      g) rg="$OPTARG" ;;
-      s) use_sso=1 ;;
-      c) sso_account="$OPTARG" ;;
-      K) keyfile="$OPTARG" ;;
-      *) ;;
+  _need ibmcloud || return 1
+  local sel="" region="" rg=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --region) region="$2"; shift 2 ;;
+      --rg)     rg="$2";     shift 2 ;;
+      *)        sel="$1";    shift    ;;
     esac
   done
 
-  _ensure_region "$region"
-
-  if (( use_sso )); then
-    if [[ -n "$sso_account" ]]; then
-      ibmcloud login --sso -a "$IBMC_API_ENDPOINT" -c "$sso_account" -r "$region" || return 1
-    else
-      ibmcloud login --sso -a "$IBMC_API_ENDPOINT" -r "$region" || return 1
-    fi
+  local keyf
+  if [[ -n "$sel" ]]; then
+    keyf="$(_keyfile_for "$sel")"
   else
-    [[ -n "$keyfile" ]] || keyfile="$(_keyfile_for "$acct")"
-    local key; key="$(_read_key "$keyfile")" || return 1
-    ibmcloud login --apikey "$key" -a "$IBMC_API_ENDPOINT" -r "$region" || return 1
+    keyf="$(_keyfile_for "$IBMC_DEFAULT")"
+  fi
+  if [[ ! -r "$keyf" ]]; then
+    printf "%sKey file not readable: %s%s\n" "${RED}" "$keyf" "${RESET}" >&2
+    return 1
   fi
 
-  _ensure_region "$region"
-  _ensure_rg
+  echo "Logging in with key: $keyf"
+  ibmcloud login -a "${IBMC_API_ENDPOINT}" --apikey @"$keyf" -q || return 1
+
+  [[ -n "$region" ]] || region="$IBMC_REGION"
+  [[ -n "$rg"     ]] || rg="$IBMC_RG"
+  [[ -n "$region" ]] && ibmcloud target -r "$region" || true
+  [[ -n "$rg"     ]] && ibmcloud target -g "$rg"     || true
   ibmwhoami
 }
 
-# ibmaccls — list accounts, robust across shapes
-ibmaccls() {
-  local j out
-  j="$(ibmcloud account list --output json 2>/dev/null || true)"
-  if [[ -n "$j" && "$j" != "null" ]]; then
-    out="$(printf '%s' "$j" | jq -r '
-      def rows:
-        if type=="array" then .[]
-        elif type=="object" and (has("Guid") or has("LinkedAccounts")) then
-          . as $p | ([$p] + (.LinkedAccounts // []))[]
-        else . end;
-      rows
-      | {name:(.name//.Name), id:(.account_id//.Guid),
-         state:(.state//.State//"unknown"),
-         owner:(.owner_iam_id//.owneribmid//.owner_ibmid//.OwnerIamId//.OwnerIbmid//"n/a")}
-      | select(.name and .id) | [.name,.id,.state,.owner] | @tsv
-    ' 2>/dev/null)"
-    if [[ -n "$out" ]]; then
-      awk -F'\t' 'BEGIN{
-        printf "%-40s %-36s %-10s %s\n","Name","AccountID","State","Owner"
-      }{ printf "%-40s %-36s %-10s %s\n",$1,$2,$3,$4 }' <<<"$out"
-      return 0
-    fi
-  fi
-  ibmcloud account list 2>/dev/null \
-  | awk 'NR<=2{next} NF{print}' \
-  | awk 'BEGIN{
-      printf "%-40s %-36s %-10s %s\n","Name","AccountID","State","Owner"
-    }{
-      n=split($0,a,/[[:space:]]{2,}/); name=a[1]; acct=a[2]; state=a[3]; owner=a[4]; if(owner=="")owner="n/a";
-      printf "%-40s %-36s %-10s %s\n",name,acct,state,owner
-    }'
-}
-
-# ibmaccswap [-s] <account_name|account_id|/path/key.json>
-# Default: API key re-login using resolved keyfile. With -s: SSO + account switch.
-ibmaccswap() {
-  local use_sso=0 sel=""
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      -s|--sso) use_sso=1; shift ;;
-      *) sel="$1"; shift ;;
-    esac
-  done
-  [[ -n "$sel" ]] || { echo "Usage: ibmaccswap [-s] <acct|keyfile>"; return 1; }
-
-  if (( use_sso )); then
-    _ensure_region "$IBMC_REGION"
-    ibmcloud login --sso -a "$IBMC_API_ENDPOINT" -r "$IBMC_REGION" || return 1
-    # try to switch by account id resolved from name
-    local acct_id
-    acct_id="$(ibmcloud account list --output json 2>/dev/null \
-      | jq -r --arg x "$sel" '
-          def lc(s): (s // "" | tostring | ascii_downcase);
-          .[] | select(lc(.name)==lc($x) or lc(.account_id)==lc($x)) | .account_id' \
-      | head -n1)"
-    [[ -n "$acct_id" ]] || { echo "Could not resolve account: $sel" >&2; return 1; }
-    ibmcloud account switch -a "$acct_id" || return 1
-    _ensure_region "$IBMC_REGION"; _ensure_rg; ibmwhoami; return 0
-  fi
-
-  # Non-interactive API key flow
-  local keyfile=""
-  if [[ "$sel" == */* || "$sel" == *.json ]]; then
-    [[ -r "$sel" ]] && keyfile="$sel"
-  fi
-  [[ -n "$keyfile" ]] || keyfile="$(_keyfile_for "$sel")"
-  [[ -r "$keyfile" ]] || { echo "No readable keyfile for '$sel'." >&2; return 1; }
-
-  local key; key="$(_read_key "$keyfile")" || return 1
-  _ensure_region "$IBMC_REGION"
-  ibmcloud login --apikey "$key" -a "$IBMC_API_ENDPOINT" -r "$IBMC_REGION" || return 1
-  _ensure_region "$IBMC_REGION"; _ensure_rg; ibmwhoami
-}
-
-# Pretty "who am I"
+# Usage: ibmwhoami
 ibmwhoami() {
-  ibmcloud target 2>/dev/null | awk '
-    /^API endpoint/ ||
-    /^Region/ ||
-    /^User/ ||
-    /^Account/ ||
-    /^Resource group/ {print}'
+  _need jq || return 1
+  ibmcloud target --output json 2>/dev/null | jq -r '
+    "API endpoint: \(.api_endpoint)\n" +
+    "Region:       \(.region)\n" +
+    "User:         \(.user.email)\n" +
+    "Account:      \(.account.name) (\(.account.guid)) <-> \(.account.bluemix_subscriptions[0].ims_account_id)\n" +
+    "Resource group: " + (.resource_group.name // "none")
+  ' | sed -E \
+      -e "s/^API endpoint:/${BOLD}${CYAN}&${RESET}/" \
+      -e "s/^Region:/${BOLD}${CYAN}&${RESET}/" \
+      -e "s/^User:/${BOLD}${CYAN}&${RESET}/" \
+      -e "s/^Account:/${BOLD}${CYAN}&${RESET}/" \
+      -e "s/^Resource group:/${BOLD}${CYAN}&${RESET}/"
+}
+
+# Usage: ibmaccls
+ibmaccls() {
+  _need jq || return 1
+  ibmcloud account list --output json | jq -r '
+    (["Name","AccountID","State","Owner"] | @tsv),
+    (.[] | [.name,.account_id,.state,.owner_ibmid] | @tsv)
+  ' | column -t -s$'\t'
+}
+
+# Usage: ibmaccswap <acctName|guid|keyfile>
+ibmaccswap() {
+  _need ibmcloud || return 1
+  local sel="$1"
+  if [[ -z "$sel" ]]; then
+    echo "Usage: ibmaccswap <acctName|guid|keyfile>" >&2
+    return 1
+  fi
+
+  local keyf
+  keyf="$(_keyfile_for "$sel")"
+  if [[ ! -r "$keyf" ]]; then
+    echo "${RED}No usable keyfile for $sel${RESET}" >&2
+    return 1
+  fi
+
+  echo "Swapping account using keyfile: $keyf"
+  ibmcloud login --apikey @"$keyf" -q || return 1
+
+  local acctN acctI
+  acctN="$(ibmcloud target --output json | jq -r '.account.name')"
+  acctI="$(ibmcloud target --output json | jq -r '.account.guid')"
+
+  echo "${GREEN}Switched account:${RESET} ${BOLD}${acctN}${RESET} (${acctI})"
+  ibmwhoami
 }

@@ -84,29 +84,28 @@ ibmrgmk() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --target|-t) set_target=1; shift ;;
-      *) if [[ -z "$name" ]]; then name="$1"; shift; else echo "Unexpected arg: $1" >&2; return 2; fi ;;
+      *) if [[ -z "$name" ]]; then name="$1"; shift; else c_err "Unexpected arg: $1"; return 2; fi ;;
     esac
   done
-  [[ -n "$name" ]] || { echo "Usage: ibmrgmk <name> [--target|-t]"; return 2; }
+  [[ -n "$name" ]] || { c_warn "Usage: ibmrgmk <name> [--target|-t]"; return 2; }
 
   if ibmcloud resource groups --output json 2>/dev/null \
        | jq -e --arg n "$name" '.[] | select(.name==$n)' >/dev/null; then
-    echo "Resource group already exists: $name"
+    c_note "Resource group already exists: $name"
   else
     ibmcloud resource group-create "$name" || return 1
+    c_ok "Created resource group: $name"
   fi
 
-  # eventual consistency guard – tiny wait helps before listing/targeting
   sleep 2
-
   ibmrgls
 
   if (( set_target )); then
     if _iam_try_target_rg "$name"; then
-      echo "Targeted resource group '$name'."
+      c_ok "Targeted resource group '$name'."
       command -v ibmwhoami >/dev/null 2>&1 && ibmwhoami || true
     else
-      echo "Created but could not target resource group '$name'." >&2
+      c_err "Created but could not target resource group '$name'."
     fi
   fi
 }
