@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# functions/iam.sh — stub for IAM helpers
+
+ # ...existing code...
+#!/usr/bin/env bash
 # IAM & Resource Group helpers
 # Requires: ibmcloud, jq
 
