@@ -45,11 +45,11 @@ ibmhelp() {
     local usages; usages="$(grep -nE '^[[:space:]]*#*[[:space:]]*Usage:' "$f" 2>/dev/null | _clean_usage | awk 'NF')"
     local hdr; hdr="$(_header_of "$f")"
 
-    local include_file=1
+    local include_file=1 file_matched=0
     if [[ -n "$filter" ]]; then
       include_file=0
-      if echo "$base" | grep -iq -- "$filter"; then include_file=1; fi
-      if [[ $include_file -eq 0 && -n "$hdr" ]] && echo "$hdr" | grep -iq -- "$filter"; then include_file=1; fi
+      if echo "$base" | grep -iq -- "$filter"; then include_file=1; file_matched=1; fi
+      if [[ $include_file -eq 0 && -n "$hdr" ]] && echo "$hdr" | grep -iq -- "$filter"; then include_file=1; file_matched=1; fi
       if [[ $include_file -eq 0 && -n "$usages" ]] && echo "$usages" | grep -iq -- "$filter"; then include_file=1; fi
     fi
     [[ $include_file -eq 1 ]] || continue
@@ -72,7 +72,7 @@ ibmhelp() {
     local printed=0
     while IFS= read -r u; do
       [[ -n "$u" ]] || continue
-      if [[ -n "$filter" ]] && ! echo "$u" | grep -iq -- "$filter"; then
+      if [[ -n "$filter" && $file_matched -eq 0 ]] && ! echo "$u" | grep -iq -- "$filter"; then
         continue
       fi
       if [[ -z "${_seen[$u]+x}" ]]; then

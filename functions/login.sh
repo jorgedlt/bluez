@@ -8,12 +8,10 @@
 : "${BOLD:=$'\033[1m'}"
 : "${RESET:=$'\033[0m'}"
 
-# Provide _need if init.sh was not sourced
 if ! declare -F _need >/dev/null 2>&1; then
   _need() { command -v "$1" >/dev/null 2>&1 || { printf "%sMissing dependency: %s%s\n" "$RED" "$1" "$RESET" >&2; return 1; }; }
 fi
 
-# Fallback for _keyfile_for and defaults if init.sh was not sourced
 if ! declare -F _keyfile_for >/dev/null 2>&1; then
   _keyfile_for() {
     local sel="$1"
@@ -23,6 +21,7 @@ if ! declare -F _keyfile_for >/dev/null 2>&1; then
     printf '%s\n' "${IBMC_KEYFILE_SANDBOX:-$HOME/ibmcloud_api_key_sandbox.json}"
   }
 fi
+
 : "${IBMC_API_ENDPOINT:=https://cloud.ibm.com}"
 : "${IBMC_REGION:=us-south}"
 : "${IBMC_RG:=default}"
@@ -62,29 +61,44 @@ ibmlogin() {
 }
 
 # Usage: ibmwhoami
+# Parses plain `ibmcloud target` output for maximum compatibility across CLI versions.
 ibmwhoami() {
-  _need jq || return 1
-  ibmcloud target --output json 2>/dev/null | jq -r '
-    "API endpoint: \(.api_endpoint)\n" +
-    "Region:       \(.region)\n" +
-    "User:         \(.user.email)\n" +
-    "Account:      \(.account.name) (\(.account.guid)) <-> \(.account.bluemix_subscriptions[0].ims_account_id)\n" +
-    "Resource group: " + (.resource_group.name // "none")
-  ' | sed -E \
-      -e "s/^API endpoint:/${BOLD}${CYAN}&${RESET}/" \
-      -e "s/^Region:/${BOLD}${CYAN}&${RESET}/" \
-      -e "s/^User:/${BOLD}${CYAN}&${RESET}/" \
-      -e "s/^Account:/${BOLD}${CYAN}&${RESET}/" \
-      -e "s/^Resource group:/${BOLD}${CYAN}&${RESET}/"
+  _need ibmcloud || return 1
+  local t; t="$(ibmcloud target 2>/dev/null || true)"
+  if [[ -z "$t" ]]; then
+    printf "%sNot logged in.%s\n" "$YELLOW" "$RESET" >&2
+    return 1
+  fi
+
+  # Extract fields from the standard human-readable output
+  local api region user account rg
+  api="$(awk -F': *' '/^API endpoint:/ {print $2}' <<<"$t")"
+  region="$(awk -F': *' '/^Region:/ {print $2}' <<<"$t")"
+  user="$(awk -F': *' '/^User:/ {print $2}' <<<"$t")"
+  account="$(awk -F': *' '/^Account:/ {print $2}' <<<"$t")"
+  rg="$(awk -F': *' '/^Resource group:/ {print $2}' <<<"$t")"
+
+  # Normalize empty values
+  [[ -n "$api"    ]] || api="unknown"
+  [[ -n "$region" ]] || region="unknown"
+  [[ -n "$user"   ]] || user="unknown"
+  [[ -n "$account" ]] || account="unknown"
+  if [[ -z "$rg" || "$rg" =~ ^No\ resource\ group\ targeted ]]; then
+    rg="none"
+  fi
+
+  printf "%sAPI endpoint:%s %s\n"     "${BOLD}${CYAN}" "${RESET}" "$api"
+  printf "%sRegion:%s       %s\n"     "${BOLD}${CYAN}" "${RESET}" "$region"
+  printf "%sUser:%s         %s\n"     "${BOLD}${CYAN}" "${RESET}" "$user"
+  printf "%sAccount:%s      %s\n"     "${BOLD}${CYAN}" "${RESET}" "$account"
+  printf "%sResource group:%s %s\n"   "${BOLD}${CYAN}" "${RESET}" "$rg"
 }
 
 # Usage: ibmaccls
+# Uses the CLI's built-in table output to avoid JSON shape drift.
 ibmaccls() {
-  _need jq || return 1
-  ibmcloud account list --output json | jq -r '
-    (["Name","AccountID","State","Owner"] | @tsv),
-    (.[] | [.name,.account_id,.state,.owner_ibmid] | @tsv)
-  ' | column -t -s$'\t'
+  _need ibmcloud || return 1
+  ibmcloud account list
 }
 
 # Usage: ibmaccswap <acctName|guid|keyfile>
@@ -105,11 +119,5 @@ ibmaccswap() {
 
   echo "Swapping account using keyfile: $keyf"
   ibmcloud login --apikey @"$keyf" -q || return 1
-
-  local acctN acctI
-  acctN="$(ibmcloud target --output json | jq -r '.account.name')"
-  acctI="$(ibmcloud target --output json | jq -r '.account.guid')"
-
-  echo "${GREEN}Switched account:${RESET} ${BOLD}${acctN}${RESET} (${acctI})"
   ibmwhoami
 }
