@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+# functions/help.sh — ibmhelp: IBM Cloud help system wrapper
+
+ibmhelp() {
+  ibmcloud help "$@"
+}
+#!/usr/bin/env bash
 # help.sh, dynamic help for loaded modules
 
 ibmhelp() {

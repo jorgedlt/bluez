@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
-# misc.sh — plugins, env cleanups, quick targets, interactive account picker
-# Note: we intentionally DO NOT add an ibmswitch() here to avoid conflicting
-# with the newer ibmswitchaccount in login.sh.
 
-#+ Show installed IBM Cloud CLI plugins
-# Usage: ibmplugins
 ibmplugins() { ibmcloud plugin list; }
 
 # Clear IBM Cloud related environment variables
@@ -49,3 +44,7 @@ ibmtarget() {
   fi
   ibmwhoami
 }
+#!/usr/bin/env bash
+# functions/misc.sh — stub for misc helpers
+
+# ...existing code...

@@ -18,6 +18,9 @@ if ! declare -F _keyfile_for >/dev/null 2>&1; then
     if [[ "$sel" == */* || "$sel" == *.json ]]; then
       [[ -r "$sel" ]] && { printf '%s\n' "$sel"; return 0; }
     fi
+#!/usr/bin/env bash
+# functions/login.sh — ibmlogin: IBM Cloud login helper (non-interactive)
+
     printf '%s\n' "${IBMC_KEYFILE_SANDBOX:-$HOME/ibmcloud_api_key_sandbox.json}"
   }
 fi
