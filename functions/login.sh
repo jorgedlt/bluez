@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# login.sh, login and account helpers
+# functions/login.sh — IBM Cloud login & account switching helpers
+# - Resolves keyfiles by friendly name, IMS last-3, or path (no full GUIDs in code)
+# - Always passes region on login to avoid interactive prompt
+# - Provides ibmlogin, ibmaccswap, ibmaccls, ibmwhoami
 
+# ---------- colors ----------
 : "${RED:=$'\033[31m'}"
 : "${GREEN:=$'\033[32m'}"
 : "${YELLOW:=$'\033[33m'}"
@@ -8,32 +12,61 @@
 : "${BOLD:=$'\033[1m'}"
 : "${RESET:=$'\033[0m'}"
 
+# ---------- deps ----------
 if ! declare -F _need >/dev/null 2>&1; then
   _need() { command -v "$1" >/dev/null 2>&1 || { printf "%sMissing dependency: %s%s\n" "$RED" "$1" "$RESET" >&2; return 1; }; }
 fi
 
-if ! declare -F _keyfile_for >/dev/null 2>&1; then
-  _keyfile_for() {
-    local sel="$1"
-    if [[ "$sel" == */* || "$sel" == *.json ]]; then
-      [[ -r "$sel" ]] && { printf '%s\n' "$sel"; return 0; }
-    fi
-#!/usr/bin/env bash
-# functions/login.sh — ibmlogin: IBM Cloud login helper (non-interactive)
-
-    printf '%s\n' "${IBMC_KEYFILE_SANDBOX:-$HOME/ibmcloud_api_key_sandbox.json}"
-  }
-fi
-
+# ---------- defaults ----------
 : "${IBMC_API_ENDPOINT:=https://cloud.ibm.com}"
 : "${IBMC_REGION:=us-south}"
-: "${IBMC_RG:=default}"
-: "${IBMC_DEFAULT:=sandbox}"
+: "${IBMC_RG:=}"
+: "${IBMC_DEFAULT:=sandbox}"   # default alias -> sandbox (011)
 
-# Usage: ibmlogin [key-or-alias] [--region REGION] [--rg GROUP]
+# ---------- keyfile resolver (no full GUIDs) ----------
+# Usage: _keyfile_for <acctName|alias|IMS-last3|keyfile>
+_keyfile_for() {
+  local sel="$1"; [[ -n "$sel" ]] || return 1
+
+  # direct path / file
+  if [[ "$sel" == */* || "$sel" == *.json ]]; then
+    [[ -r "$sel" ]] && { printf '%s\n' "$sel"; return 0; }
+  fi
+
+  local H="$HOME"
+  local k_legacy="$H/ibmcloud_key_legacy-128.json"
+  local k_sbx="$H/ibmcloud_key_sandbox-011.json"
+  local k_alpha="$H/ibmcloud_key_DevAlpha-729.json"
+  local k_beta="$H/ibmcloud_key_DevBeta-651.json"
+
+  # normalize token (case/space/dash/underscore insensitive)
+  local t="${sel,,}"; t="${t//[^a-z0-9]/}"
+
+  # aliases (friendly names + IMS last-3) — keep short, no GUIDs
+  declare -A MAP=(
+    [legacy]="$k_legacy" [128]="$k_legacy" [epositbox]="$k_legacy"
+    [sandbox]="$k_sbx"   [011]="$k_sbx"    [sandboxaccnt]="$k_sbx"
+    [devalpha]="$k_alpha" [sandboxdevalpha]="$k_alpha" [729]="$k_alpha"
+    [devbeta]="$k_beta"   [sandboxdevbeta]="$k_beta"   [651]="$k_beta"
+  )
+  if [[ -n "${MAP[$t]:-}" && -r "${MAP[$t]}" ]]; then
+    printf '%s\n' "${MAP[$t]}"; return 0
+  fi
+
+  # IMS last-3 fallback (patterned filenames)
+  if [[ "$t" =~ ^[0-9]{3}$ ]]; then
+    local g; g="$(ls "$H"/ibmcloud_key_*-"$t".json 2>/dev/null | head -n1)"
+    [[ -r "$g" ]] && { printf '%s\n' "$g"; return 0; }
+  fi
+
+  return 1
+}
+
+# ---------- commands ----------
+# Usage: ibmlogin [alias|path.json] [--region REGION] [--rg GROUP]
 ibmlogin() {
   _need ibmcloud || return 1
-  local sel="" region="" rg=""
+  local sel="" region="${IBMC_REGION:-us-south}" rg="${IBMC_RG:-}"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --region) region="$2"; shift 2 ;;
@@ -43,28 +76,39 @@ ibmlogin() {
   done
 
   local keyf
-  if [[ -n "$sel" ]]; then
-    keyf="$(_keyfile_for "$sel")"
-  else
-    keyf="$(_keyfile_for "$IBMC_DEFAULT")"
-  fi
-  if [[ ! -r "$keyf" ]]; then
-    printf "%sKey file not readable: %s%s\n" "${RED}" "$keyf" "${RESET}" >&2
-    return 1
-  fi
+  keyf="$(_keyfile_for "${sel:-${IBMC_DEFAULT:-sandbox}}")" \
+    || { printf "%sNo usable keyfile for '%s'%s\n" "$RED" "${sel:-${IBMC_DEFAULT:-sandbox}}" "$RESET" >&2; return 1; }
 
   echo "Logging in with key: $keyf"
-  ibmcloud login -a "${IBMC_API_ENDPOINT}" --apikey @"$keyf" -q || return 1
-
-  [[ -n "$region" ]] || region="$IBMC_REGION"
-  [[ -n "$rg"     ]] || rg="$IBMC_RG"
-  [[ -n "$region" ]] && ibmcloud target -r "$region" || true
-  [[ -n "$rg"     ]] && ibmcloud target -g "$rg"     || true
+  IBMCLOUD_COLOR=false ibmcloud login -a "$IBMC_API_ENDPOINT" -r "$region" --apikey @"$keyf" -q || return 1
+  [[ -n "$rg" ]] && ibmcloud target -g "$rg" >/dev/null 2>&1 || true
   ibmwhoami
 }
 
+# Usage: ibmaccswap <acctName|alias|IMS-last3|keyfile>
+ibmaccswap() {
+  _need ibmcloud || return 1
+  local sel="$1"
+  [[ -n "$sel" ]] || { echo "Usage: ibmaccswap <acctName|alias|IMS-last3|keyfile>" >&2; return 1; }
+
+  local keyf
+  keyf="$(_keyfile_for "$sel")" || { echo "${RED}No usable keyfile for $sel${RESET}" >&2; return 1; }
+
+  echo "Swapping account using keyfile: $keyf"
+  IBMCLOUD_COLOR=false ibmcloud login --apikey @"$keyf" -q || return 1
+  [[ -n "${IBMC_REGION:-}" ]] && ibmcloud target -r "$IBMC_REGION" >/dev/null 2>&1 || true
+  [[ -n "${IBMC_RG:-}"     ]] && ibmcloud target -g "$IBMC_RG"     >/dev/null 2>&1 || true
+  ibmwhoami
+}
+
+# Usage: ibmaccls
+ibmaccls() {
+  _need ibmcloud || return 1
+  ibmcloud account list
+}
+
 # Usage: ibmwhoami
-# Parses plain `ibmcloud target` output for maximum compatibility across CLI versions.
+# Parses human-readable `ibmcloud target` (works even when JSON is flaky)
 ibmwhoami() {
   _need ibmcloud || return 1
   local t; t="$(ibmcloud target 2>/dev/null || true)"
@@ -73,7 +117,6 @@ ibmwhoami() {
     return 1
   fi
 
-  # Extract fields from the standard human-readable output
   local api region user account rg
   api="$(awk -F': *' '/^API endpoint:/ {print $2}' <<<"$t")"
   region="$(awk -F': *' '/^Region:/ {print $2}' <<<"$t")"
@@ -81,46 +124,15 @@ ibmwhoami() {
   account="$(awk -F': *' '/^Account:/ {print $2}' <<<"$t")"
   rg="$(awk -F': *' '/^Resource group:/ {print $2}' <<<"$t")"
 
-  # Normalize empty values
   [[ -n "$api"    ]] || api="unknown"
   [[ -n "$region" ]] || region="unknown"
   [[ -n "$user"   ]] || user="unknown"
   [[ -n "$account" ]] || account="unknown"
-  if [[ -z "$rg" || "$rg" =~ ^No\ resource\ group\ targeted ]]; then
-    rg="none"
-  fi
+  if [[ -z "$rg" || "$rg" =~ ^No\ resource\ group\ targeted ]]; then rg="none"; fi
 
-  printf "%sAPI endpoint:%s %s\n"     "${BOLD}${CYAN}" "${RESET}" "$api"
-  printf "%sRegion:%s       %s\n"     "${BOLD}${CYAN}" "${RESET}" "$region"
-  printf "%sUser:%s         %s\n"     "${BOLD}${CYAN}" "${RESET}" "$user"
-  printf "%sAccount:%s      %s\n"     "${BOLD}${CYAN}" "${RESET}" "$account"
-  printf "%sResource group:%s %s\n"   "${BOLD}${CYAN}" "${RESET}" "$rg"
-}
-
-# Usage: ibmaccls
-# Uses the CLI's built-in table output to avoid JSON shape drift.
-ibmaccls() {
-  _need ibmcloud || return 1
-  ibmcloud account list
-}
-
-# Usage: ibmaccswap <acctName|guid|keyfile>
-ibmaccswap() {
-  _need ibmcloud || return 1
-  local sel="$1"
-  if [[ -z "$sel" ]]; then
-    echo "Usage: ibmaccswap <acctName|guid|keyfile>" >&2
-    return 1
-  fi
-
-  local keyf
-  keyf="$(_keyfile_for "$sel")"
-  if [[ ! -r "$keyf" ]]; then
-    echo "${RED}No usable keyfile for $sel${RESET}" >&2
-    return 1
-  fi
-
-  echo "Swapping account using keyfile: $keyf"
-  ibmcloud login --apikey @"$keyf" -q || return 1
-  ibmwhoami
+  printf "%sAPI endpoint:%s %s\n"   "${BOLD}${CYAN}" "${RESET}" "$api"
+  printf "%sRegion:%s       %s\n"   "${BOLD}${CYAN}" "${RESET}" "$region"
+  printf "%sUser:%s         %s\n"   "${BOLD}${CYAN}" "${RESET}" "$user"
+  printf "%sAccount:%s      %s\n"   "${BOLD}${CYAN}" "${RESET}" "$account"
+  printf "%sResource group:%s %s\n" "${BOLD}${CYAN}" "${RESET}" "$rg"
 }
