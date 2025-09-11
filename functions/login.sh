@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# login.sh, login and account helpers
+# functions/login.sh — IBM Cloud login & account switching helpers
+# - Resolves keyfiles by friendly name, IMS last-3, or path (no full GUIDs in code)
+# - Always passes region on login to avoid interactive prompt
+# - Provides ibmlogin, ibmaccswap, ibmaccls, ibmwhoami
 
+# ---------- colors ----------
 : "${RED:=$'\033[31m'}"
 : "${GREEN:=$'\033[32m'}"
 : "${YELLOW:=$'\033[33m'}"
@@ -8,97 +12,61 @@
 : "${BOLD:=$'\033[1m'}"
 : "${RESET:=$'\033[0m'}"
 
-# Minimal dep checker
-_need() { command -v "$1" >/dev/null 2>&1 || { printf "%sMissing dependency: %s%s\n" "$RED" "$1" "$RESET" >&2; return 1; }; }
+# ---------- deps ----------
+if ! declare -F _need >/dev/null 2>&1; then
+  _need() { command -v "$1" >/dev/null 2>&1 || { printf "%sMissing dependency: %s%s\n" "$RED" "$1" "$RESET" >&2; return 1; }; }
+fi
 
+# ---------- defaults ----------
 : "${IBMC_API_ENDPOINT:=https://cloud.ibm.com}"
 : "${IBMC_REGION:=us-south}"
-: "${IBMC_RG:=default}"
-: "${IBMC_DEFAULT:=sandbox}"
+: "${IBMC_RG:=}"
+: "${IBMC_DEFAULT:=sandbox}"   # default alias -> sandbox (011)
 
-# Build an in-memory map from keyfiles in $HOME following pattern:
-#   ibmcloud_key_<alias>-NNN.json  (e.g., ibmcloud_key_legacy-128.json)
-_ibm_key_index() {
-  shopt -s nullglob
-  local f base alias last3
-  for f in "$HOME"/ibmcloud_key_*.json; do
-    base="$(basename "$f")"
-    if [[ "$base" =~ ^ibmcloud_key_(.+)-([0-9]{3})\.json$ ]]; then
-      alias="${BASH_REMATCH[1],,}"
-      last3="${BASH_REMATCH[2]}"
-      printf "%s\t%s\t%s\n" "$alias" "$last3" "$f"
-    fi
-  done
-  shopt -u nullglob
-}
-
-# Resolve selector to keyfile without hardcoding full GUIDs.
-# Accepts:
-#   - path to a readable file
-#   - alias match (legacy, sandbox, devalpha, devbeta, etc.)
-#   - IMS last-3 digits (128, 011, 729, 651)
-#   - partial alias substrings
+# ---------- keyfile resolver (no full GUIDs) ----------
+# Usage: _keyfile_for <acctName|alias|IMS-last3|keyfile>
 _keyfile_for() {
-  local sel="$1"
-  [[ -n "$sel" ]] || return 1
+  local sel="$1"; [[ -n "$sel" ]] || return 1
 
-  # direct path
-  if [[ -r "$sel" ]]; then printf '%s\n' "$sel"; return 0; fi
-
-  local s="${sel,,}"
-  local rows row alias last3 file best=""
-  mapfile -t rows < <(_ibm_key_index)
-
-  # exact by last3 (numeric 3)
-  if [[ "$s" =~ ^[0-9]{3}$ ]]; then
-    for row in "${rows[@]}"; do
-      alias="${row%%$'\t'*}"; row="${row#*$'\t'}"
-      last3="${row%%$'\t'*}"; file="${row#*$'\t'}"
-      if [[ "$last3" == "$s" ]]; then best="$file"; break; fi
-    done
-    [[ -n "$best" ]] && { printf '%s\n' "$best"; return 0; }
+  # direct path / file
+  if [[ "$sel" == */* || "$sel" == *.json ]]; then
+    [[ -r "$sel" ]] && { printf '%s\n' "$sel"; return 0; }
   fi
 
-  # exact alias
-  for row in "${rows[@]}"; do
-    alias="${row%%$'\t'*}"; row="${row#*$'\t'}"
-    file="${row#*$'\t'}"
-    if [[ "$alias" == "$s" ]]; then printf '%s\n' "$file"; return 0; fi
-  done
+  local H="$HOME"
+  local k_legacy="$H/ibmcloud_key_legacy-128.json"
+  local k_sbx="$H/ibmcloud_key_sandbox-011.json"
+  local k_alpha="$H/ibmcloud_key_DevAlpha-729.json"
+  local k_beta="$H/ibmcloud_key_DevBeta-651.json"
 
-  # common synonyms -> canonical alias
-  case "$s" in
-    legacy|legacy-128) s="legacy" ;;
-    sandbox|sandbox-011) s="sandbox" ;;
-    devalpha|dev-alpha|alpha) s="devalpha" ;;
-    devbeta|dev-beta|beta) s="devbeta" ;;
-  esac
+  # normalize token (case/space/dash/underscore insensitive)
+  local t="${sel,,}"; t="${t//[^a-z0-9]/}"
 
-  # substring alias
-  for row in "${rows[@]}"; do
-    alias="${row%%$'\t'*}"; row="${row#*$'\t'}"
-    file="${row#*$'\t'}"
-    if [[ "$alias" == *"$s"* ]]; then best="$file"; break; fi
-  done
-  [[ -n "$best" ]] && { printf '%s\n' "$best"; return 0; }
+  # aliases (friendly names + IMS last-3) — keep short, no GUIDs
+  declare -A MAP=(
+    [legacy]="$k_legacy" [128]="$k_legacy" [epositbox]="$k_legacy"
+    [sandbox]="$k_sbx"   [011]="$k_sbx"    [sandboxaccnt]="$k_sbx"
+    [devalpha]="$k_alpha" [sandboxdevalpha]="$k_alpha" [729]="$k_alpha"
+    [devbeta]="$k_beta"   [sandboxdevbeta]="$k_beta"   [651]="$k_beta"
+  )
+  if [[ -n "${MAP[$t]:-}" && -r "${MAP[$t]}" ]]; then
+    printf '%s\n' "${MAP[$t]}"; return 0
+  fi
+
+  # IMS last-3 fallback (patterned filenames)
+  if [[ "$t" =~ ^[0-9]{3}$ ]]; then
+    local g; g="$(ls "$H"/ibmcloud_key_*-"$t".json 2>/dev/null | head -n1)"
+    [[ -r "$g" ]] && { printf '%s\n' "$g"; return 0; }
+  fi
 
   return 1
 }
 
-# Usage: ibmaccmap  (show discovered aliases -> files, masked)
-ibmaccmap() {
-  local rows row alias last3 file
-  printf "%-12s %-6s %s\n" "Alias" "IMS" "Keyfile"
-  printf "%-12s %-6s %s\n" "-----" "----" "-------"
-  while IFS=$'\t' read -r alias last3 file; do
-    printf "%-12s %-6s %s\n" "$alias" "$last3" "$file"
-  done < <(_ibm_key_index)
-}
-
-# Usage: ibmlogin [key-or-alias] [--region REGION] [--rg GROUP]
+# ---------- commands ----------
+# Usage: ibmlogin [alias|path.json] [--region REGION] [--rg GROUP]
 ibmlogin() {
   _need ibmcloud || return 1
-  local sel="" region="" rg=""
+  local sel="" region="${IBMC_REGION:-us-south}" rg="${IBMC_RG:-}"
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --region) region="$2"; shift 2 ;;
@@ -108,27 +76,46 @@ ibmlogin() {
   done
 
   local keyf
-  if [[ -n "$sel" ]]; then
-    keyf="$(_keyfile_for "$sel")" || { printf "%sNo usable keyfile for '%s'%s\n" "$RED" "$sel" "$RESET" >&2; return 1; }
-  else
-    keyf="$(_keyfile_for "$IBMC_DEFAULT")" || { printf "%sDefault keyfile not found%s\n" "$RED" "$RESET" >&2; return 1; }
-  fi
+  keyf="$(_keyfile_for "${sel:-${IBMC_DEFAULT:-sandbox}}")" \
+    || { printf "%sNo usable keyfile for '%s'%s\n" "$RED" "${sel:-${IBMC_DEFAULT:-sandbox}}" "$RESET" >&2; return 1; }
 
   echo "Logging in with key: $keyf"
-  ibmcloud login -a "${IBMC_API_ENDPOINT}" --apikey @"$keyf" -q || return 1
-
-  [[ -n "$region" ]] || region="$IBMC_REGION"
-  [[ -n "$rg"     ]] || rg="$IBMC_RG"
-  [[ -n "$region" ]] && ibmcloud target -r "$region" >/dev/null 2>&1 || true
-  [[ -n "$rg"     ]] && ibmcloud target -g "$rg"     >/dev/null 2>&1 || true
+  IBMCLOUD_COLOR=false ibmcloud login -a "$IBMC_API_ENDPOINT" -r "$region" --apikey @"$keyf" -q || return 1
+  [[ -n "$rg" ]] && ibmcloud target -g "$rg" >/dev/null 2>&1 || true
   ibmwhoami
 }
 
+# Usage: ibmaccswap <acctName|alias|IMS-last3|keyfile>
+ibmaccswap() {
+  _need ibmcloud || return 1
+  local sel="$1"
+  [[ -n "$sel" ]] || { echo "Usage: ibmaccswap <acctName|alias|IMS-last3|keyfile>" >&2; return 1; }
+
+  local keyf
+  keyf="$(_keyfile_for "$sel")" || { echo "${RED}No usable keyfile for $sel${RESET}" >&2; return 1; }
+
+  echo "Swapping account using keyfile: $keyf"
+  IBMCLOUD_COLOR=false ibmcloud login --apikey @"$keyf" -q || return 1
+  [[ -n "${IBMC_REGION:-}" ]] && ibmcloud target -r "$IBMC_REGION" >/dev/null 2>&1 || true
+  [[ -n "${IBMC_RG:-}"     ]] && ibmcloud target -g "$IBMC_RG"     >/dev/null 2>&1 || true
+  ibmwhoami
+}
+
+# Usage: ibmaccls
+ibmaccls() {
+  _need ibmcloud || return 1
+  ibmcloud account list
+}
+
 # Usage: ibmwhoami
+# Parses human-readable `ibmcloud target` (works even when JSON is flaky)
 ibmwhoami() {
   _need ibmcloud || return 1
   local t; t="$(ibmcloud target 2>/dev/null || true)"
-  [[ -n "$t" ]] || { printf "%sNot logged in.%s\n" "$YELLOW" "$RESET" >&2; return 1; }
+  if [[ -z "$t" ]]; then
+    printf "%sNot logged in.%s\n" "$YELLOW" "$RESET" >&2
+    return 1
+  fi
 
   local api region user account rg
   api="$(awk -F': *' '/^API endpoint:/ {print $2}' <<<"$t")"
@@ -136,29 +123,16 @@ ibmwhoami() {
   user="$(awk -F': *' '/^User:/ {print $2}' <<<"$t")"
   account="$(awk -F': *' '/^Account:/ {print $2}' <<<"$t")"
   rg="$(awk -F': *' '/^Resource group:/ {print $2}' <<<"$t")"
-  [[ -n "$api" ]]    || api="unknown"
+
+  [[ -n "$api"    ]] || api="unknown"
   [[ -n "$region" ]] || region="unknown"
-  [[ -n "$user" ]]   || user="unknown"
-  [[ -n "$account" ]]|| account="unknown"
+  [[ -n "$user"   ]] || user="unknown"
+  [[ -n "$account" ]] || account="unknown"
   if [[ -z "$rg" || "$rg" =~ ^No\ resource\ group\ targeted ]]; then rg="none"; fi
 
-  printf "%sAPI endpoint:%s %s\n"     "${BOLD}${CYAN}" "${RESET}" "$api"
-  printf "%sRegion:%s       %s\n"     "${BOLD}${CYAN}" "${RESET}" "$region"
-  printf "%sUser:%s         %s\n"     "${BOLD}${CYAN}" "${RESET}" "$user"
-  printf "%sAccount:%s      %s\n"     "${BOLD}${CYAN}" "${RESET}" "$account"
-  printf "%sResource group:%s %s\n"   "${BOLD}${CYAN}" "${RESET}" "$rg"
-}
-
-# Usage: ibmaccls
-ibmaccls() { _need ibmcloud || return 1; ibmcloud account list; }
-
-# Usage: ibmaccswap <acctName|alias|IMS-last3|keyfile>
-ibmaccswap() {
-  _need ibmcloud || return 1
-  local sel="$1"
-  [[ -n "$sel" ]] || { echo "Usage: ibmaccswap <acctName|alias|IMS-last3|keyfile>" >&2; return 1; }
-  local keyf; keyf="$(_keyfile_for "$sel")" || { echo "${RED}No usable keyfile for $sel${RESET}" >&2; return 1; }
-  echo "Swapping account using keyfile: $keyf"
-  ibmcloud login --apikey @"$keyf" -q || return 1
-  ibmwhoami
+  printf "%sAPI endpoint:%s %s\n"   "${BOLD}${CYAN}" "${RESET}" "$api"
+  printf "%sRegion:%s       %s\n"   "${BOLD}${CYAN}" "${RESET}" "$region"
+  printf "%sUser:%s         %s\n"   "${BOLD}${CYAN}" "${RESET}" "$user"
+  printf "%sAccount:%s      %s\n"   "${BOLD}${CYAN}" "${RESET}" "$account"
+  printf "%sResource group:%s %s\n" "${BOLD}${CYAN}" "${RESET}" "$rg"
 }
