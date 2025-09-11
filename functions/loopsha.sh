@@ -9,6 +9,7 @@ loopsha() {
     "$HOME/ibmcloud_key_sandbox-011.json"
     "$HOME/ibmcloud_key_DevAlpha-729.json"
     "$HOME/ibmcloud_key_DevBeta-651.json"
+    "$HOME/ibmcloud_key_DevGamma-773.json"
   )
   local cmd="$1"; shift || true
   local args=("$@")
@@ -51,6 +52,7 @@ loopsha_cmd() {
     "$HOME/ibmcloud_key_sandbox-011.json"
     "$HOME/ibmcloud_key_DevAlpha-729.json"
     "$HOME/ibmcloud_key_DevBeta-651.json"
+    "$HOME/ibmcloud_key_DevGamma-773.json"
   )
   local cmd="$1"
   mask(){ local s="$1"; local n=${#s}; ((n<=8)) && printf "%s\n" "$s" || printf "%s...%s\n" "${s:0:4}" "${s: -4}"; }

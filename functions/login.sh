@@ -38,6 +38,7 @@ _keyfile_for() {
   local k_sbx="$H/ibmcloud_key_sandbox-011.json"
   local k_alpha="$H/ibmcloud_key_DevAlpha-729.json"
   local k_beta="$H/ibmcloud_key_DevBeta-651.json"
+  local k_gamma="$H/ibmcloud_key_DevGamma-773.json"
 
   # normalize token (case/space/dash/underscore insensitive)
   local t="${sel,,}"; t="${t//[^a-z0-9]/}"
@@ -48,6 +49,7 @@ _keyfile_for() {
     [sandbox]="$k_sbx"   [011]="$k_sbx"    [sandboxaccnt]="$k_sbx"
     [devalpha]="$k_alpha" [sandboxdevalpha]="$k_alpha" [729]="$k_alpha"
     [devbeta]="$k_beta"   [sandboxdevbeta]="$k_beta"   [651]="$k_beta"
+    [devgamma]="$k_gamma" [sandboxdevgamma]="$k_gamma" [773]="$k_gamma"
   )
   if [[ -n "${MAP[$t]:-}" && -r "${MAP[$t]}" ]]; then
     printf '%s\n' "${MAP[$t]}"; return 0
