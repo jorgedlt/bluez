@@ -29,45 +29,42 @@ _iam_try_target_rg() {
 }
 
 # ---------- Resource Groups ----------
-# Pretty list, robust even if JSON is missing/invalid
-ibmrgls() {
-  _iam_need ibmcloud || return 1
-  _iam_need jq || return 1
-
-  local j rc
-  j="$(ibmcloud resource groups --output json 2>/dev/null || true)"; rc=$?
-
-  # If we got nothing or invalid JSON, fall back to plain table
-  if [[ $rc -ne 0 || -z "$j" ]] || ! jq -e . >/dev/null 2>&1 <<<"$j"; then
-    # Fallback to the human table; mark current
-    local cur; cur="$(_iam_current_rg)"
-    printf "%-24s | %-36s | %-8s\n" "Resource Group" "ID" "State"
-    ibmcloud resource groups 2>/dev/null \
-      | awk 'NR>2 && NF' \
-      | awk -v cur="$cur" -F'  +' '
-          {name=$1; state=$2}
-          name!=""{
-            mark=(name==cur)?"* ":"  "
-            printf "%-24s | %-36s | %-8s\n", mark name, "-", state
+ibmrgls () 
+{ 
+    _iam_need ibmcloud || return 1
+    _iam_need jq || return 1
+    local j rc
+    j="$(ibmcloud resource groups --output json 2>/dev/null || true)"
+    rc=$?
+    if [[ $rc -ne 0 || -z "$j" ]] || ! jq -e . >/dev/null 2>&1 <<<"$j"; then
+        local cur
+        cur="$(_iam_current_rg)"
+        printf "%-24s | %-36s | %-8s\n" "Resource Group" "ID" "State"
+        ibmcloud resource groups 2>/dev/null | awk 'NR>2 && NF' | awk -v cur="$cur" -F'  +' '
+          {
+            name=$1; state=$2
+            if (name == cur) {
+              printf "%-24s | %-36s* | %-8s\n", name, "-", state
+            } else {
+              printf "%-24s | %-36s  | %-8s\n", name, "-", state
+            }
           }'
-    return 0
-  fi
-
-  # If JSON is valid but empty/null
-  if jq -e 'type=="array" and length==0' >/dev/null 2>&1 <<<"$j"; then
-    echo "No resource groups found."
-    return 0
-  fi
-
-  local cur; cur="$(_iam_current_rg)"
-  printf "%-24s | %-36s | %-8s\n" "Resource Group" "ID" "State"
-  echo "$j" \
-    | jq -r '.[] | [.name, .id, .state] | @tsv' \
-    | while IFS=$'\t' read -r name id state; do
-        printf "%-24s | %-36s | %-8s\n" \
-          "$( [[ "$name" == "$cur" ]] && printf "* %s" "$name" || printf "  %s" "$name")" \
-          "$id" "$state"
-      done
+        return 0
+    fi
+    if jq -e 'type=="array" and length==0' >/dev/null 2>&1 <<<"$j"; then
+        echo "No resource groups found."
+        return 0
+    fi
+    local cur
+    cur="$(_iam_current_rg)"
+    printf "%-24s | %-36s | %-8s\n" "Resource Group" "ID" "State"
+    echo "$j" | jq -r '.[] | [.name, .id, .state] | @tsv' | while IFS=$'\t' read -r name id state; do
+        if [[ "$name" == "$cur" ]]; then
+            printf "%-24s | %-36s* | %-8s\n" "$name" "$id" "$state"
+        else
+            printf "%-24s | %-36s  | %-8s\n" "$name" "$id" "$state"
+        fi
+    done
 }
 
 # Show one RG

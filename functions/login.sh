@@ -93,7 +93,15 @@ ibmaccswap() {
   ibmwhoami
 }
 
-ibmaccls() {
-  _need ibmcloud || return 1
-  ibmcloud account list
+ibmaccls () {
+    _need ibmcloud || return 1
+
+    current_account=$(ibmcloud target --output json 2>/dev/null | jq -r '.account.guid')
+    ibmcloud account list | awk -v current="$current_account" '
+        NR==1 {print; next}
+        {
+            marker = ($1 == current ? "*" : " ")
+            printf "%s %s\n", marker, $0
+        }
+    '
 }
